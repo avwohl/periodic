@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Acquire an exclusive non-blocking file lock, then run a command.
+
+Usage: pp_lock LOCKFILE COMMAND [ARGS...]
+
+Exits 75 if the lock is already held (another instance is running).
+Otherwise exits with the command's exit status.
+"""
+
+import fcntl
+import subprocess
+import sys
+
+if len(sys.argv) < 3:
+    print("usage: pp_lock LOCKFILE COMMAND [ARGS...]", file=sys.stderr)
+    sys.exit(1)
+
+lock_path = sys.argv[1]
+command = sys.argv[2:]
+
+try:
+    lock_fd = open(lock_path, "a")
+except OSError as e:
+    print(f"pp_lock: cannot open {lock_path}: {e}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError:
+    print(f"pp_lock: cannot acquire lock {lock_path} (already held)", file=sys.stderr)
+    sys.exit(75)
+
+result = subprocess.run(command)
+lock_fd.close()
+sys.exit(result.returncode)

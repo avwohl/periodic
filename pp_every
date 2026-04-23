@@ -1,0 +1,65 @@
+#!/bin/bash
+# pp_every - check if a periodic task should run this period
+#
+# Usage:
+#   pp_every read day|week|month KEYFILE
+#     Prints: PERIOD_KEY ok|notyet
+#     "ok"     = task has not yet run this period
+#     "notyet" = task already ran this period
+#
+#   pp_every write PERIOD_KEY KEYFILE
+#     Records that the task completed for PERIOD_KEY
+
+set -o errexit
+
+# Format tag written into every marker file. Lets us rev the on-disk format
+# later (bump to periodic_v2 etc.) and treat old markers as "needs to run".
+CHECKSUM="periodic_v1"
+
+period_key() {
+    case "$1" in
+        day)   date +%Y%m%d ;;
+        week)  date +%Gw%V ;;
+        month) date +%Y%m ;;
+        *)     echo "pp_every: unknown frequency: $1" >&2; exit 1 ;;
+    esac
+}
+
+do_read() {
+    local freq="$1"
+    local keyfile="$2"
+    local current_key
+    current_key="$(period_key "$freq")"
+
+    if [ -r "$keyfile" ]; then
+        local line
+        line="$(cat "$keyfile")"
+        local stored_key="${line%%,*}"
+        local stored_check="${line#*,}"
+        if [ "$stored_check" = "$CHECKSUM" ] && [ "$stored_key" = "$current_key" ]; then
+            echo "$current_key notyet"
+            return
+        fi
+    fi
+    echo "$current_key ok"
+}
+
+do_write() {
+    local key="$1"
+    local keyfile="$2"
+    local tmpfile="${keyfile}.new"
+    echo "${key},${CHECKSUM}" > "$tmpfile"
+    mv "$tmpfile" "$keyfile"
+}
+
+if [ $# -lt 3 ]; then
+    echo "usage: pp_every read day|week|month KEYFILE" >&2
+    echo "       pp_every write PERIOD_KEY KEYFILE" >&2
+    exit 1
+fi
+
+case "$1" in
+    read)  do_read "$2" "$3" ;;
+    write) do_write "$2" "$3" ;;
+    *)     echo "pp_every: unknown command: $1" >&2; exit 1 ;;
+esac

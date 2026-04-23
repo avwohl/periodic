@@ -1,0 +1,35 @@
+# periodic.conf - sourced as bash by periodic.sh
+#
+# Variables, command substitution, and conditionals all work here.
+
+# Where to write log files (one per run)
+PERIODIC_LOGDIR="/local/var/log/periodic"
+
+# Lock file -- prevents concurrent runs
+PERIODIC_LOCKFILE="/local/var/locks/periodic"
+
+# Where faevery stores its time-tracking state
+PERIODIC_TIMEDIR="/local/var/log/times"
+
+# Nice level (default 20)
+PERIODIC_NICE=20
+
+# Email for notifications (empty = no mail)
+PERIODIC_MAILTO=""
+
+# Directories to scan for executable *.sh scripts.
+# Format: "/path/to/dir" or "/path/to/dir:frequency"
+# Frequency is day (default), week, or month.
+# Scripts run in glob (alphabetical) order within each directory.
+# Directories are processed in array order.
+PERIODIC_DIRS=(
+    "/local/periodic/daily.d:day"
+    "/local/periodic/weekly.d:week"
+)
+
+# Application-specific variables for part scripts
+# (these are exported so part scripts can use them).
+# periodic.sh already exports PP_DATE (YYYYMMDD) and PP_DATETIME; here we add
+# a hostname and a combined host_date key some parts use for backup paths.
+export PP_HOSTNAME="$(hostname -s)"
+export PP_HOST_DATE_KEY="${PP_HOSTNAME}_${PP_DATE}"
