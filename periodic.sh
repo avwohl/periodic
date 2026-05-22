@@ -40,8 +40,10 @@ source "$CONFIG_FILE"
 : "${PERIODIC_TIMEDIR:=/var/lib/periodic/times}"
 : "${PERIODIC_NICE:=20}"
 : "${PERIODIC_MAILTO:=}"
+: "${PERIODIC_TRACE:=}"
+: "${PERIODIC_FAIL_TAIL:=200}"
 
-export PERIODIC_LOGDIR PERIODIC_TIMEDIR
+export PERIODIC_LOGDIR PERIODIC_TIMEDIR PERIODIC_TRACE
 
 mkdir -p "$PERIODIC_LOGDIR" "$PERIODIC_TIMEDIR" "$(dirname "$PERIODIC_LOCKFILE")"
 
@@ -63,8 +65,25 @@ fi
 
 LOGFILE="${_PERIODIC_LOGFILE}"
 
+# Optional shell-level trace: log every command this script (and each part)
+# executes.  Uses BASH_ENV so the trace propagates into any nested bash
+# invocation (e.g. 10-weekly.sh's `exec bash weekly.bash`) as well.
+PERIODIC_BASH_ENV=""
+if [ -n "$PERIODIC_TRACE" ]; then
+    export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
+    set -x
+    PERIODIC_BASH_ENV="$(mktemp -t periodic.bashenv.XXXXXX)"
+    {
+        echo "export PS4='+ [\${BASH_SOURCE##*/}:\${LINENO}] '"
+        echo "set -x"
+    } > "$PERIODIC_BASH_ENV"
+    export BASH_ENV="$PERIODIC_BASH_ENV"
+    trap '[ -n "$PERIODIC_BASH_ENV" ] && rm -f "$PERIODIC_BASH_ENV"' EXIT
+fi
+
 echo "periodic: starting at $(date)"
 echo "periodic: host=$(hostname -s) date=${PP_DATE} config=${CONFIG_FILE}"
+[ -n "$PERIODIC_TRACE" ] && echo "periodic: trace mode ON (PERIODIC_TRACE=$PERIODIC_TRACE)"
 
 if [ ${#PERIODIC_DIRS[@]} -eq 0 ]; then
     echo "periodic: PERIODIC_DIRS is empty, nothing to do"
@@ -105,19 +124,51 @@ for dir_spec in "${PERIODIC_DIRS[@]}"; do
         DID_SOMETHING=1
         echo "periodic: run  $script at $(date)"
 
+        # Capture this part's combined output to a tempfile while still
+        # tee'ing it live into the main log.  The tempfile lets us replay
+        # the tail in the FAIL block below without scraping the main log.
+        part_out="$(mktemp -t "periodic.$(basename "$script").XXXXXX")"
+
+        # Trace propagates to bash children automatically via BASH_ENV.
         set +o errexit
-        "$script"
-        rc=$?
+        "$script" 2>&1 | tee "$part_out"
+        rc=${PIPESTATUS[0]}
         set -o errexit
 
         if [ "$rc" != "0" ]; then
-            echo "periodic: FAIL $script exit=$rc at $(date)"
-            if [ -n "$PERIODIC_MAILTO" ]; then
-                mail -s "FAIL $(hostname -s) periodic: $(basename "$script")" \
-                    "$PERIODIC_MAILTO" < "$LOGFILE"
+            # Decode signal vs ordinary exit code.
+            if [ "$rc" -gt 128 ]; then
+                signum=$((rc - 128))
+                signame="$(kill -l "$signum" 2>/dev/null || echo unknown)"
+                reason="killed by signal $signum (SIG$signame)"
+            else
+                reason="exit code $rc"
             fi
+            echo "periodic: FAIL $script -- $reason at $(date)"
+            echo "periodic: --- last ${PERIODIC_FAIL_TAIL} lines of $(basename "$script") output ---"
+            tail -n "${PERIODIC_FAIL_TAIL}" "$part_out" | sed 's/^/  | /'
+            echo "periodic: --- end FAIL detail for $(basename "$script") ---"
+
+            if [ -n "$PERIODIC_MAILTO" ]; then
+                {
+                    echo "periodic part FAILED on $(hostname -s)"
+                    echo "  script : $script"
+                    echo "  reason : $reason"
+                    echo "  when   : $(date)"
+                    echo
+                    echo "Last ${PERIODIC_FAIL_TAIL} lines of script output:"
+                    echo "----"
+                    tail -n "${PERIODIC_FAIL_TAIL}" "$part_out"
+                    echo "----"
+                    echo
+                    echo "Full log: ${LOGFILE}"
+                } | mail -s "FAIL $(hostname -s) periodic: $(basename "$script") ($reason)" \
+                    "$PERIODIC_MAILTO"
+            fi
+            rm -f "$part_out"
             exit 1
         fi
+        rm -f "$part_out"
 
         "${SCRIPT_DIR}/pp_every" write "$period_key" "$timefile"
         echo "periodic: ok   $script at $(date)"

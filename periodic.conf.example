@@ -17,6 +17,15 @@ PERIODIC_NICE=20
 # Email for notifications (empty = no mail)
 PERIODIC_MAILTO=""
 
+# When non-empty, log every command this script (and each part) executes by
+# enabling shell xtrace.  Uses BASH_ENV so the trace propagates into nested
+# bash invocations as well.  Useful for debugging cron failures; verbose.
+PERIODIC_TRACE=""
+
+# On a part failure, how many trailing lines of the part's output to replay
+# in the FAIL detail block (and in the mail body).
+PERIODIC_FAIL_TAIL=200
+
 # Directories to scan for executable *.sh scripts.
 # Format: "/path/to/dir" or "/path/to/dir:frequency"
 # Frequency is day (default), week, or month.
