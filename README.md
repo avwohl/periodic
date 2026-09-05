@@ -73,7 +73,10 @@ The config file is sourced as bash, so anything bash accepts is legal
 	PERIODIC_TIMEDIR     where per-script markers are kept      (default /var/lib/periodic/times)
 	PERIODIC_LOCKFILE    file lock path                          (default /tmp/periodic.lock)
 	PERIODIC_NICE        nice level for the whole run            (default 20)
+	PERIODIC_WORKDIR     cwd handed to every part                 (default /)
 	PERIODIC_MAILTO      if non-empty, mail the log on success and failure (default empty)
+	PERIODIC_TRACE       if non-empty, xtrace the run and every part (default empty)
+	PERIODIC_FAIL_TAIL   lines of a failed part's output to replay  (default 200)
 
 `PERIODIC_DIRS` is the one you care about. Each entry is a directory path,
 optionally followed by `:day`, `:week`, or `:month`. The suffix controls how
@@ -119,6 +122,14 @@ captured into the run's logfile.
 
 These are set *before* the config is sourced, so the config can override them
 if you want to pin them (e.g. force all parts to share a specific date key).
+
+Parts are run with the working directory set to `PERIODIC_WORKDIR` (default
+`/`), not the directory cron happened to start in. Do not rely on the cwd — cd
+somewhere explicit if your part cares. The default is deliberately a directory
+every uid can traverse: cron starts root's jobs in `/root` (mode `0700`), and a
+part that drops privileges with `runuser`/`su`/`sudo` inherits that cwd. Tools
+that save and restore their working directory (GNU `find`, for one) then fail
+outright, which under `set -e` takes the whole part down.
 
 You may also export your own variables from `periodic.conf` — they're
 inherited by every part. The example config exports `PP_HOSTNAME` and

@@ -8,11 +8,17 @@ PERIODIC_LOGDIR="/local/var/log/periodic"
 # Lock file -- prevents concurrent runs
 PERIODIC_LOCKFILE="/local/var/locks/periodic"
 
-# Where faevery stores its time-tracking state
+# Where pp_every stores its time-tracking state
 PERIODIC_TIMEDIR="/local/var/log/times"
 
 # Nice level (default 20)
 PERIODIC_NICE=20
+
+# Working directory for the run.  Every part inherits it, so it must be
+# traversable by any uid a part might drop privileges to (default "/").
+# cron starts the job in the invoking user's home -- /root, mode 0700 -- which
+# a part that runs `runuser -u someone` cannot chdir back into.
+PERIODIC_WORKDIR="/"
 
 # Email for notifications (empty = no mail)
 PERIODIC_MAILTO=""

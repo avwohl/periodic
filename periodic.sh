@@ -23,6 +23,11 @@ if [ ! -r "$CONFIG_FILE" ]; then
     exit 1
 fi
 
+# Make the config path absolute before anything chdirs: we re-exec ourselves
+# with it below, and we cd to PERIODIC_WORKDIR before running parts.  A
+# relative path would otherwise be re-resolved against the wrong directory.
+CONFIG_FILE="$(cd "$(dirname "$CONFIG_FILE")" && pwd)/$(basename "$CONFIG_FILE")"
+
 # Set built-in exports BEFORE sourcing config so the config can override them.
 #   PP_DATE      YYYYMMDD     -- fixed for the whole run
 #   PP_DATETIME  YYYYMMDD_HHMMSS -- fixed for the whole run (used in log name)
@@ -39,6 +44,7 @@ source "$CONFIG_FILE"
 : "${PERIODIC_LOCKFILE:=/tmp/periodic.lock}"
 : "${PERIODIC_TIMEDIR:=/var/lib/periodic/times}"
 : "${PERIODIC_NICE:=20}"
+: "${PERIODIC_WORKDIR:=/}"
 : "${PERIODIC_MAILTO:=}"
 : "${PERIODIC_TRACE:=}"
 : "${PERIODIC_FAIL_TAIL:=200}"
@@ -77,9 +83,25 @@ if [ -n "$PERIODIC_TRACE" ]; then
         echo "export PS4='+ [\${BASH_SOURCE##*/}:\${LINENO}] '"
         echo "set -x"
     } > "$PERIODIC_BASH_ENV"
+    # World-readable on purpose.  BASH_ENV is inherited across a privilege drop
+    # (runuser/su/sudo), and if the new uid cannot read the file bash prints
+    # "Permission denied" and silently runs the part untraced -- losing the
+    # trace for exactly the part being debugged.  Contents are just PS4 and
+    # `set -x`; no secrets belong here.
+    chmod 0644 "$PERIODIC_BASH_ENV"
     export BASH_ENV="$PERIODIC_BASH_ENV"
     trap '[ -n "$PERIODIC_BASH_ENV" ] && rm -f "$PERIODIC_BASH_ENV"' EXIT
 fi
+
+# Parts inherit this process's cwd.  cron starts us in the invoking user's home
+# -- /root, mode 0700 -- so a part that drops privileges lands in a directory
+# the new uid cannot even chdir back into.  GNU find, for one, saves its initial
+# cwd, walks the tree, fails to restore it, and exits non-zero, which takes down
+# any part running under `set -e`.  Hand every part a defined cwd instead.
+cd "$PERIODIC_WORKDIR" || {
+    echo "periodic: cannot cd to PERIODIC_WORKDIR: $PERIODIC_WORKDIR" >&2
+    exit 1
+}
 
 echo "periodic: starting at $(date)"
 echo "periodic: host=$(hostname -s) date=${PP_DATE} config=${CONFIG_FILE}"
